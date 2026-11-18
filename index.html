@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Drone Remote</title>
+<style>
+:root{
+  --bg:#e4ecee; --panel:#f6f9f9; --ink:#14211f; --mute:#5d6f6c; --line:#b9c9cb;
+  --accent:#f2d400; --accent-ink:#14211f; --danger:#d3392b; --ok:#1f8a5b;
+  --pad:#cfdcdf; --knob:#14211f;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#0f1b1d; --panel:#172629; --ink:#e6f0ef; --mute:#8ba3a0; --line:#2c4144;
+  --accent:#f2d400; --accent-ink:#14211f; --pad:#1f3236; --knob:#e6f0ef;}
+}
+*{box-sizing:border-box;touch-action:manipulation}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"Archivo Narrow","Barlow Condensed","Arial Narrow",system-ui,sans-serif;font-size:16px}
+body{padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom));min-height:100vh}
+.wrap{max-width:980px;margin:0 auto;display:grid;gap:12px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{margin:0;font-size:1.6rem;letter-spacing:.01em}
+.status{display:flex;align-items:center;gap:8px;font-weight:600}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--mute)}
+.dot.on{background:var(--ok)} .dot.demo{background:var(--accent);outline:2px solid var(--ink)}
+button{font:inherit;font-weight:700;border:2px solid var(--ink);background:var(--panel);color:var(--ink);
+  padding:10px 16px;border-radius:6px;cursor:pointer;min-height:44px}
+button:hover{background:var(--accent);color:var(--accent-ink)}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);color:var(--accent-ink)}
+button.stop{background:var(--danger);color:#fff;border-color:var(--danger);width:100%;font-size:1.1rem}
+button:disabled{opacity:.45;cursor:not-allowed}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.sticks{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.stickbox{display:grid;gap:6px;justify-items:center}
+.stickbox small{color:var(--mute)}
+.pad{position:relative;width:min(100%,300px);aspect-ratio:1;border-radius:50%;background:var(--pad);
+  border:2px solid var(--ink);touch-action:none;user-select:none}
+.pad::before,.pad::after{content:"";position:absolute;background:var(--line)}
+.pad::before{left:50%;top:8%;bottom:8%;width:1px}.pad::after{top:50%;left:8%;right:8%;height:1px}
+.knob{position:absolute;width:26%;height:26%;border-radius:50%;background:var(--knob);left:37%;top:37%;
+  pointer-events:none}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>button{flex:1 1 110px}
+.meters{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center}
+.meter b{display:block;font-size:1.4rem;font-variant-numeric:tabular-nums}
+.meter span{color:var(--mute);font-size:.85rem}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+label{display:grid;gap:4px;font-weight:600;font-size:.9rem}
+input,select,textarea{font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);width:100%}
+textarea{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.85rem}
+.form{display:grid;gap:10px}
+details summary{cursor:pointer;font-weight:700;padding:4px 0}
+#log{height:150px;overflow:auto;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;
+  background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px}
+.warn{font-size:.9rem;color:var(--mute);margin:0}
+.banner{display:none;background:var(--danger);color:#fff;padding:10px 14px;border-radius:8px;font-weight:700}
+@media (max-width:700px){.cols{grid-template-columns:1fr}.sticks{gap:6px}.meters{grid-template-columns:repeat(2,1fr)}}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Drone Remote</h1>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">Not connected</span></div>
+  </header>
+
+  <div class="banner" id="banner"></div>
+
+  <div class="panel row">
+    <button class="primary" id="btnConnect">Connect Bluetooth</button>
+    <button id="btnDemo">Demo mode</button>
+    <button id="btnDisconnect" disabled>Disconnect</button>
+  </div>
+
+  <div class="panel">
+    <div class="sticks">
+      <div class="stickbox">
+        <div class="pad" id="padL" aria-label="Left stick: throttle and yaw"><div class="knob"></div></div>
+        <small>Left: throttle ↕ / yaw ↔ (W S A D)</small>
+      </div>
+      <div class="stickbox">
+        <div class="pad" id="padR" aria-label="Right stick: pitch and roll"><div class="knob"></div></div>
+        <small>Right: pitch ↕ / roll ↔ (arrow keys)</small>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel meters">
+    <div class="meter"><b id="mT">0</b><span>Throttle</span></div>
+    <div class="meter"><b id="mY">0</b><span>Yaw</span></div>
+    <div class="meter"><b id="mP">0</b><span>Pitch</span></div>
+    <div class="meter"><b id="mR">0</b><span>Roll</span></div>
+  </div>
+
+  <div class="panel form">
+    <div class="row">
+      <button id="btnTakeoff">Take off</button>
+      <button id="btnLand">Land</button>
+      <button id="btnHeadless">Headless</button>
+      <button id="btnCal">Calibrate</button>
+      <button id="btnCenter">Center sticks</button>
+    </div>
+    <button class="stop" id="btnStop">EMERGENCY STOP (Space)</button>
+  </div>
+
+  <div class="cols">
+    <div class="panel form">
+      <strong>Connection profile</strong>
+      <label>Service UUID
+        <input id="svc" value="0000ffe5-0000-1000-8000-00805f9b34fb" spellcheck="false"></label>
+      <label>Write characteristic UUID
+        <input id="chr" value="0000ffe9-0000-1000-8000-00805f9b34fb" spellcheck="false"></label>
+      <label>Name prefix filter (optional)
+        <input id="prefix" placeholder="e.g. Drone"></label>
+      <label>Packet template (hex)
+        <textarea id="tpl" rows="2" spellcheck="false">66 {R} {P} {T} {Y} {F} {CK} 99</textarea></label>
+      <p class="warn">Tokens: {R} roll, {P} pitch, {T} throttle, {Y} yaw, {F} flags, {CK} checksum (XOR of the bytes between the first and last byte). Each channel is 0–255, center is 128.</p>
+    </div>
+    <div class="panel form">
+      <strong>Control tuning</strong>
+      <label>Send rate: <span id="rateV">30</span> Hz
+        <input type="range" id="rate" min="10" max="60" value="30"></label>
+      <label>Stick sensitivity: <span id="sensV">70</span>%
+        <input type="range" id="sens" min="20" max="100" value="70"></label>
+      <label>Deadzone: <span id="dzV">5</span>%
+        <input type="range" id="dz" min="0" max="25" value="5"></label>
+      <label>Flag bits (takeoff / land / stop / headless / calibrate)
+        <input id="bits" value="1,2,4,8,16" spellcheck="false"></label>
+      <button id="btnSave">Save profile</button>
+      <p class="warn">Safety: fly outdoors with space, props guarded, and keep a hand near Emergency Stop. Sticks reset to neutral when you leave this tab or the connection drops.</p>
+    </div>
+  </div>
+
+  <details class="panel">
+    <summary>Packet monitor</summary>
+    <div id="log" aria-live="off"></div>
+  </details>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+
+  // ---- State ----
+  const S = { T:0, Y:0, P:0, R:0 };          // -1..1 (throttle 0..1 held)
+  let flags = 0, flagUntil = 0, headless = false;
+  let device = null, char = null, demo = false, timer = null, sending = false, packets = 0;
+
+  // ---- Logging / status ----
+  function log(msg){
+    const el = $('log'); el.textContent += msg + '\n';
+    if (el.textContent.length > 6000) el.textContent = el.textContent.slice(-4000);
+    el.scrollTop = el.scrollHeight;
+  }
+  function banner(msg){ const b=$('banner'); b.textContent=msg||''; b.style.display=msg?'block':'none'; }
+  function setStatus(text, mode){
+    $('statusText').textContent = text;
+    $('dot').className = 'dot' + (mode ? ' ' + mode : '');
+    const live = !!mode;
+    $('btnDisconnect').disabled = !live;
+    $('btnConnect').disabled = live;
+    $('btnDemo').disabled = live;
+  }
+
+  // ---- Profile ----
+  const fields = ['svc','chr','prefix','tpl','bits','rate','sens','dz'];
+  function loadProfile(){
+    try {
+      const p = JSON.parse(localStorage.getItem('droneRemoteProfile') || 'null');
+      if (p) fields.forEach(f => { if (p[f] != null) $(f).value = p[f]; });
+    } catch(e){}
+    ['rate','sens','dz'].forEach(f => $(f+'V').textContent = $(f).value);
+  }
+  $('btnSave').onclick = () => {
+    try {
+      const p = {}; fields.forEach(f => p[f] = $(f).value);
+      localStorage.setItem('droneRemoteProfile', JSON.stringify(p));
+      log('Profile saved.');
+    } catch(e){ log('Could not save profile: ' + e.message); }
+  };
+  ['rate','sens','dz'].forEach(f => $(f).oninput = () => {
+    $(f+'V').textContent = $(f).value;
+    if (f === 'rate' && timer) startLoop();
+  });
+
+  // ---- Packet building ----
+  const hex = n => n.toString(16).padStart(2,'0').toUpperCase();
+  function channel(v){ return clamp(Math.round(128 + v*127), 0, 255); }
+  function shaped(v){
+    const dz = $('dz').value/100, sens = $('sens').value/100;
+    if (Math.abs(v) < dz) return 0;
+    const s = Math.sign(v) * (Math.abs(v)-dz) / (1-dz);
+    return s * sens;
+  }
+  function buildPacket(){
+    const now = performance.now();
+    const bits = $('bits').value.split(',').map(n => parseInt(n,10) || 0);
+    let f = (now < flagUntil) ? flags : 0;
+    if (headless) f |= (bits[3] || 0);
+    const vals = {
+      R: channel(shaped(S.R)),
+      P: channel(shaped(S.P)),
+      T: clamp(Math.round(S.T * $('sens').value/100 * 255 + (S.T>0 ? 0 : 0)), 0, 255),
+      Y: channel(shaped(S.Y)),
+      F: f & 255
+    };
+    const parts = $('tpl').value.trim().split(/\s+/);
+    const bytes = new Array(parts.length).fill(0);
+    let ckIndex = -1;
+    parts.forEach((p,i) => {
+      const m = p.match(/^\{([RPTYF]|CK)\}$/);
+      if (!m) bytes[i] = parseInt(p,16) & 255;
+      else if (m[1] === 'CK') ckIndex = i;
+      else bytes[i] = vals[m[1]];
+    });
+    if (ckIndex >= 0){
+      let x = 0;
+      for (let i=1; i<bytes.length-1; i++) if (i !== ckIndex) x ^= bytes[i];
+      bytes[ckIndex] = x;
+    }
+    return Uint8Array.from(bytes);
+  }
+
+  // ---- Sending ----
+  async function tick(){
+    updateMeters();
+    if (sending) return;                 // drop frame if previous write still pending
+    const pkt = buildPacket();
+    sending = true;
+    try {
+      if (demo){
+        // simulated link
+      } else if (char){
+        if (char.properties.writeWithoutResponse) await char.writeValueWithoutResponse(pkt);
+        else await char.writeValue(pkt);
+      }
+      packets++;
+      if (packets % Math.max(1, Math.round($('rate').value/3)) === 0)
+        log('TX ' + Array.from(pkt).map(hex).join(' '));
+    } catch(e){
+      log('Write failed: ' + e.message);
+    } finally { sending = false; }
+  }
+  function startLoop(){
+    clearInterval(timer);
+    timer = setInterval(tick, 1000 / $('rate').value);
+  }
+  function stopLoop(){ clearInterval(timer); timer = null; }
+
+  function neutral(){ S.T = 0; S.Y = 0; S.P = 0; S.R = 0; resetKnobs(); }
+
+  // ---- Bluetooth ----
+  $('btnConnect').onclick = async () => {
+    banner('');
+    if (!navigator.bluetooth){
+      banner('Web Bluetooth is not available. Use Chrome or Edge (Android, Windows, macOS, Linux) and open this page over HTTPS or as a local file.');
+      return;
+    }
+    const svc = $('svc').value.trim().toLowerCase();
+    const chr = $('chr').value.trim().toLowerCase();
+    const prefix = $('prefix').value.trim();
+    try {
+      setStatus('Choosing device…', '');
+      const opts = prefix
+        ? { filters:[{ namePrefix: prefix }], optionalServices:[svc] }
+        : { acceptAllDevices:true, optionalServices:[svc] };
+      device = await navigator.bluetooth.requestDevice(opts);
+      device.addEventListener('gattserverdisconnected', onDropped);
+      setStatus('Connecting to ' + (device.name || 'device') + '…', '');
+      const server = await device.gatt.connect();
+      const service = await server.getPrimaryService(svc);
+      char = await service.getCharacteristic(chr);
+      if (char.properties.notify){
+        try {
+          await char.startNotifications();
+          char.addEventListener('characteristicvaluechanged', e =>
+            log('RX ' + Array.from(new Uint8Array(e.target.value.buffer)).map(hex).join(' ')));
+        } catch(e){}
+      }
+      setStatus('Connected: ' + (device.name || 'device'), 'on');
+      log('Connected. Link ready.');
+      neutral(); startLoop();
+    } catch(e){
+      setStatus('Not connected', '');
+      banner('Connection failed: ' + e.message + '. Check the service and characteristic UUIDs in the profile.');
+      log('Connect error: ' + e.message);
+    }
+  };
+  function onDropped(){
+    neutral(); stopLoop(); char = null;
+    setStatus('Connection lost', '');
+    banner('Connection lost. Sticks reset to neutral. Reconnect to continue.');
+    log('Disconnected by device.');
+  }
+  $('btnDisconnect').onclick = async () => {
+    try { if (!demo && char) { neutral(); await char.writeValueWithoutResponse?.(buildPacket()); } } catch(e){}
+    stopLoop(); neutral();
+    if (device && device.gatt.connected) device.gatt.disconnect();
+    demo = false; char = null; setStatus('Not connected', ''); log('Disconnected.');
+  };
+  $('btnDemo').onclick = () => {
+    banner(''); demo = true; setStatus('Demo mode (no drone)', 'demo');
+    log('Demo mode: packets are generated but not sent.'); neutral(); startLoop();
+  };
+
+  // ---- Buttons ----
+  function pulse(bitIndex, ms=1000){
+    const bits = $('bits').value.split(',').map(n => parseInt(n,10) || 0);
+    flags = bits[bitIndex] || 0; flagUntil = performance.now() + ms;
+  }
+  $('btnTakeoff').onclick = () => { pulse(0); log('Take off'); };
+  $('btnLand').onclick    = () => { pulse(1); S.T = 0; resetKnobs(); log('Land'); };
+  $('btnCal').onclick     = () => { pulse(4); log('Calibrate'); };
+  $('btnHeadless').onclick= () => { headless = !headless; $('btnHeadless').classList.toggle('primary', headless); log('Headless ' + (headless?'on':'off')); };
+  $('btnCenter').onclick  = () => { neutral(); };
+  function emergency(){ neutral(); pulse(2, 1500); log('EMERGENCY STOP'); }
+  $('btnStop').onclick = emergency;
+
+  // ---- Sticks ----
+  const pads = {};
+  function makePad(id, onMove, springY){
+    const pad = $(id), knob = pad.querySelector('.knob');
+    const o = { pad, knob, x:0, y:0, active:false, onMove, springY };
+    pads[id] = o;
+    function pos(e){
+      const r = pad.getBoundingClientRect();
+      let x = ((e.clientX - r.left) / r.width) * 2 - 1;
+      let y = -(((e.clientY - r.top) / r.height) * 2 - 1);
+      const m = Math.hypot(x,y); if (m > 1){ x/=m; y/=m; }
+      o.x = x; o.y = y; draw(o); onMove(x,y);
+    }
+    pad.addEventListener('pointerdown', e => { o.active = true; pad.setPointerCapture(e.pointerId); pos(e); });
+    pad.addEventListener('pointermove', e => { if (o.active) pos(e); });
+    const end = () => {
+      o.active = false; o.x = 0;
+      if (springY) o.y = 0;
+      draw(o); onMove(o.x,o.y);
+    };
+    pad.addEventListener('pointerup', end);
+    pad.addEventListener('pointercancel', end);
+    draw(o);
+  }
+  function draw(o){
+    o.knob.style.left = (37 + o.x*37) + '%';
+    o.knob.style.top  = (37 - o.y*37) + '%';
+  }
+  makePad('padL', (x,y) => { S.Y = x; S.T = clamp((y+1)/2, 0, 1); }, false);   // throttle holds position
+  makePad('padR', (x,y) => { S.R = x; S.P = y; }, true);
+  pads.padL.y = -1; draw(pads.padL);
+  function resetKnobs(){
+    pads.padL.x = 0; pads.padL.y = -1; draw(pads.padL);
+    pads.padR.x = 0; pads.padR.y = 0; draw(pads.padR);
+  }
+  S.T = 0;
+
+  // ---- Keyboard ----
+  const keys = new Set();
+  function keyStep(){
+    if (keys.size === 0) return;
+    if (keys.has('w')) S.T = clamp(S.T + 0.02, 0, 1);
+    if (keys.has('s')) S.T = clamp(S.T - 0.02, 0, 1);
+    S.Y = keys.has('a') ? -1 : keys.has('d') ? 1 : 0;
+    S.P = keys.has('arrowup') ? 1 : keys.has('arrowdown') ? -1 : 0;
+    S.R = keys.has('arrowleft') ? -1 : keys.has('arrowright') ? 1 : 0;
+    pads.padL.x = S.Y; pads.padL.y = S.T*2-1; draw(pads.padL);
+    pads.padR.x = S.R; pads.padR.y = S.P; draw(pads.padR);
+  }
+  setInterval(keyStep, 33);
+  addEventListener('keydown', e => {
+    if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+    if (e.code === 'Space'){ e.preventDefault(); emergency(); return; }
+    const k = e.key.toLowerCase();
+    if ('wasd'.includes(k) || k.startsWith('arrow')){ e.preventDefault(); keys.add(k); }
+  });
+  addEventListener('keyup', e => {
+    const k = e.key.toLowerCase(); keys.delete(k);
+    if (['a','d'].includes(k)) { S.Y = 0; pads.padL.x = 0; draw(pads.padL); }
+    if (k.startsWith('arrow')) { S.P = 0; S.R = 0; pads.padR.x = 0; pads.padR.y = 0; draw(pads.padR); }
+  });
+
+  // ---- Failsafe when the page is hidden ----
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && (char || demo)){ neutral(); log('Tab hidden: sticks reset to neutral.'); }
+  });
+
+  function updateMeters(){
+    $('mT').textContent = Math.round(S.T*100);
+    $('mY').textContent = Math.round(shaped(S.Y)*100);
+    $('mP').textContent = Math.round(shaped(S.P)*100);
+    $('mR').textContent = Math.round(shaped(S.R)*100);
+  }
+
+  loadProfile();
+  setStatus('Not connected', '');
+  if (!navigator.bluetooth) banner('This browser has no Web Bluetooth. Demo mode still works; for real connections use Chrome or Edge.');
+})();
+</script>
+</body>
+</html>
